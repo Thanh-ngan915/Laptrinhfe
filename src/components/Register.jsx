@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import websocketService from '../services/websocketService';
 import './Auth.css';
 
 function Register() {
@@ -36,29 +37,48 @@ function Register() {
             return;
         }
 
-        // Lưu user vào localStorage
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
+        // Thử đăng ký trên server qua WebSocket
+        websocketService.connect().then(() => {
+            const onRegister = (data) => {
+                console.log('Register response:', data);
+                if (data && (data.status === 'success' || data.event === 'RE_LOGIN')) {
+                    setSuccess('Đăng ký thành công! Đang chuyển hướng...');
+                    websocketService.off('REGISTER');
+                    setTimeout(() => navigate('/login'), 1200);
+                } else {
+                    // Fallback: nếu server không hỗ trợ REGISTER, lưu local và chuyển hướng
+                    const users = JSON.parse(localStorage.getItem('users') || '[]');
+                    if (users.some(u => u.email === formData.email)) {
+                        setError('Email này đã được đăng ký!');
+                        websocketService.off('REGISTER');
+                        return;
+                    }
+                    const newUser = {
+                        id: Date.now(),
+                        name: formData.name,
+                        email: formData.email,
+                        password: formData.password
+                    };
+                    users.push(newUser);
+                    localStorage.setItem('users', JSON.stringify(users));
+                    setSuccess('Đăng ký thành công (local)! Đang chuyển hướng...');
+                    websocketService.off('REGISTER');
+                    setTimeout(() => navigate('/login'), 1200);
+                }
+            };
 
-        // Kiểm tra email đã tồn tại
-        if (users.some(u => u.email === formData.email)) {
-            setError('Email này đã được đăng ký!');
-            return;
-        }
-
-        const newUser = {
-            id: Date.now(),
-            name: formData.name,
-            email: formData.email,
-            password: formData.password
-        };
-
-        users.push(newUser);
-        localStorage.setItem('users', JSON.stringify(users));
-
-        setSuccess('Đăng ký thành công! Đang chuyển hướng...');
-        setTimeout(() => {
-            navigate('/login');
-        }, 2000);
+            websocketService.on('REGISTER', onRegister);
+            websocketService.send('REGISTER', { user: formData.name, pass: formData.password });
+        }).catch(err => {
+            console.error('WS connect error', err);
+            setError('Không thể kết nối tới server, đã lưu local');
+            // fallback local save
+            const users = JSON.parse(localStorage.getItem('users') || '[]');
+            users.push({ id: Date.now(), name: formData.name, email: formData.email, password: formData.password });
+            localStorage.setItem('users', JSON.stringify(users));
+            setSuccess('Đăng ký thành công (local)! Đang chuyển hướng...');
+            setTimeout(() => navigate('/login'), 1200);
+        });
     };
 
     return (

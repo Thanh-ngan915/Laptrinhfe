@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import websocketService from '../services/websocketService';
 import './Auth.css';
 
 function Login() {
-    const [email, setEmail] = useState('');
+    const [user, setUser] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const navigate = useNavigate();
@@ -12,17 +13,34 @@ function Login() {
         e.preventDefault();
         setError('');
 
-        // Kiểm tra thông tin đăng nhập
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        const user = users.find(u => u.email === email && u.password === password);
+        // Gửi yêu cầu đăng nhập tới server qua WebSocket
+        websocketService.connect().then(() => {
+            // register temporary listeners for login responses
+            const onReLogin = (data) => {
+                console.log('Login response:', data);
+                if (data && (data.status === 'success' || data.event === 'RE_LOGIN' || data.status === 'ok')) {
+                    const code = data.data?.RE_LOGIN_CODE || null;
+                    const userObj = { name: user, user: user, password: password, reLoginCode: code };
+                    localStorage.setItem('isAuthenticated', 'true');
+                    localStorage.setItem('currentUser', JSON.stringify(userObj));
+                    websocketService.off('RE_LOGIN');
+                    websocketService.off('LOGIN');
+                    navigate('/chat');
+                } else {
+                    setError(data.mes || 'Đăng nhập thất bại');
+                    websocketService.off('RE_LOGIN');
+                    websocketService.off('LOGIN');
+                }
+            };
 
-        if (user) {
-            localStorage.setItem('isAuthenticated', 'true');
-            localStorage.setItem('currentUser', JSON.stringify(user));
-            navigate('/home');
-        } else {
-            setError('Email hoặc mật khẩu không đúng!');
-        }
+            websocketService.on('RE_LOGIN', onReLogin);
+            websocketService.on('LOGIN', onReLogin);
+
+            websocketService.send('LOGIN', { user: user, pass: password });
+        }).catch(err => {
+            console.error('WS connect error', err);
+            setError('Không thể kết nối tới server');
+        });
     };
 
     return (
@@ -32,14 +50,14 @@ function Login() {
                 {error && <div className="error-message">{error}</div>}
                 <form onSubmit={handleSubmit}>
                     <div className="form-group">
-                        <label>Email:</label>
-                        <input
-                            type="email"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            required
-                            placeholder="Nhập email của bạn"
-                        />
+                        <label>Tên đăng nhập:</label>
+                            <input
+                                type="text"
+                                value={user}
+                                onChange={(e) => setUser(e.target.value)}
+                                required
+                                placeholder="Nhập tên đăng nhập của bạn"
+                            />
                     </div>
                     <div className="form-group">
                         <label>Mật khẩu:</label>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import './Home.css';
 
 function Home() {
@@ -18,9 +18,14 @@ function Home() {
                 <h1>Chào mừng, {currentUser.name}! 🎉</h1>
                 <p>Email: {currentUser.email}</p>
                 <p>Bạn đã đăng nhập thành công vào hệ thống.</p>
-                <button onClick={handleLogout} className="btn-logout">
-                    Đăng Xuất
-                </button>
+                <div className="button-group">
+                    <Link to="/chat" className="btn-chat">
+                        💬 Vào phòng chat
+                    </Link>
+                    <button onClick={handleLogout} className="btn-logout">
+                        Đăng Xuất
+                    </button>
+                </div>
             </div>
         </div>
     );

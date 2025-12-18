@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import Login from './components/Login';
 import Register from './components/Register';
 import Home from './components/Home.jsx';
+import Chat from './components/Chat.jsx';
 import PrivateRoute from './components/PrivateRoute';
 import './App.css';
 
@@ -19,6 +20,14 @@ function App() {
                         element={
                             <PrivateRoute>
                                 <Home />
+                            </PrivateRoute>
+                        }
+                    />
+                    <Route
+                        path="/chat"
+                        element={
+                            <PrivateRoute>
+                                <Chat />
                             </PrivateRoute>
                         }
                     />
