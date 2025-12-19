@@ -41,19 +41,44 @@ class WebSocketService {
                 // Khi nhận được message từ server
                 this.ws.onmessage = (event) => {
                     try {
-                        const data = JSON.parse(event.data);
-                        console.log('📨 Nhận từ server:', data);
+                        const raw = JSON.parse(event.data);
+                        console.log('📨 Nhận từ server:', raw);
 
-                        // Determine event key - server may use 'action' or 'event'
-                        const key = data.action || data.event || null;
+                        // Normalize server message formats:
+                        // 1) Wrapped: { action: 'onchat', data: { event: 'EVENT', data: {...} } }
+                        // 2) Flat: { event: 'EVENT', status: 'success', data: {...} }
+                        // 3) Others: fallback to passing raw
+                        let eventKey = null;
+                        let payload = null;
+                        let normalized = null;
 
-                        // Gọi các callback listeners đã đăng ký
-                        if (key && this.listeners[key]) {
-                            try { this.listeners[key](data); } catch (err) { console.error('Listener error', err); }
+                        if (raw && raw.action === 'onchat' && raw.data && typeof raw.data === 'object' && 'event' in raw.data) {
+                            eventKey = raw.data.event;
+                            payload = raw.data.data;
+                            normalized = {
+                                event: eventKey,
+                                status: raw.status || (payload && payload.status) || raw.data.status || undefined,
+                                mes: raw.mes || (payload && payload.mes) || undefined,
+                                data: payload
+                            };
+                        } else if (raw && (raw.event || raw.action)) {
+                            eventKey = raw.event || raw.action;
+                            normalized = raw;
                         }
-                        // Gọi callback tổng quát
+
+                        // Deliver to specific listener if exists
+                        if (eventKey && this.listeners[eventKey]) {
+                            try { this.listeners[eventKey](normalized); } catch (err) { console.error('Listener error', err); }
+                        }
+
+                        // Also deliver to 'onchat' listener if someone subscribed directly
+                        if (raw && raw.action && this.listeners[raw.action]) {
+                            try { this.listeners[raw.action](raw); } catch (err) { console.error('Listener error', err); }
+                        }
+
+                        // Wildcard listener receives raw for full context
                         if (this.listeners['*']) {
-                            try { this.listeners['*'](data); } catch (err) { console.error('Wildcard listener error', err); }
+                            try { this.listeners['*'](raw); } catch (err) { console.error('Wildcard listener error', err); }
                         }
                     } catch (error) {
                         console.error('Lỗi parse message:', error);

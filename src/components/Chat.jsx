@@ -21,8 +21,10 @@ function Chat() {
     /* eslint-disable-next-line no-unused-vars */
     const [joinedRooms, setJoinedRooms] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
-    const [showFallbackResults, setShowFallbackResults] = useState(false);
-    const messagesEndRef = useRef(null);
+    const [newRoomName, setNewRoomName] = useState('');
+    const [roomCreateError, setRoomCreateError] = useState('');
+    const [roomCreateSuccess, setRoomCreateSuccess] = useState('');
+        const messagesEndRef = useRef(null);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -79,31 +81,36 @@ function Chat() {
 
                 websocketService.on('GET_PEOPLE_CHAT_MES', (data) => {
                     if (data.data && Array.isArray(data.data)) {
-                        // If server returned empty result for the search, request full user list as fallback
+                        // Empty -> fallback to full user list
                         if (data.data.length === 0) {
                             console.log('GET_PEOPLE_CHAT_MES returned empty — requesting GET_USER_LIST fallback');
                             try { websocketService.send('GET_USER_LIST', {}); } catch (e) { console.warn(e); }
                             return;
                         }
 
+                        // Detect if payload is chat history (messages) or list of people
+                        const first = data.data[0];
+                        const looksLikeMessage = typeof first === 'object' && (('mes' in first) || ('from' in first) || ('time' in first));
+
+                        if (looksLikeMessage) {
+                            // Treat as messages history for people chat
+                            setMessages(data.data);
+                            return;
+                        }
+
+                        // Treat as list of people (and possible rooms)
                         const people = [];
                         const roomsList = [];
-                        
+
                         data.data.forEach(item => {
                             if (typeof item === 'string') {
-                                // Simple string format
                                 people.push(item);
-                            } else if (typeof item === 'object' && item.name) {
-                                // Object format with type field
-                                if (item.type === 0 || item.type === '0') {
-                                    // type: 0 = people (direct message)
-                                    people.push(item.name || item.to || item);
-                                } else if (item.type === 1 || item.type === '1') {
-                                    // type: 1 = rooms
-                                    roomsList.push(item);
+                            } else if (typeof item === 'object') {
+                                const nm = item.name || item.user || item.to || item.value || '';
+                                if (item.type === 1 || item.type === '1') {
+                                    roomsList.push({ name: nm });
                                 } else {
-                                    // If no type, default to people (fallback)
-                                    people.push(item.name || item.to || item);
+                                    people.push(nm || item);
                                 }
                             }
                         });
@@ -121,10 +128,22 @@ function Chat() {
                             const people = data.data.map(u => (u.name || u.user || u));
                             console.log('GET_USER_LIST returned users:', people);
                             setConversations(people);
-                            // show returned list even if it doesn't match current searchTerm
-                            setShowFallbackResults(true);
                         }
                     } catch (e) { console.warn('GET_USER_LIST handler error', e); }
+                });
+
+                // Listen CHECK_USER result and log/handle existence status
+                websocketService.on('CHECK_USER', (res) => {
+                    try {
+                        const status = res?.status || res?.data?.status;
+                        const exists = status === 'success' || res?.data?.exists === true;
+                        console.log('CHECK_USER result:', res);
+                        // If exists, optionally prioritize showing that user on top
+                        if (exists && res?.data?.user) {
+                            const uname = res.data.user;
+                            setConversations(prev => [uname, ...prev.filter(x => (typeof x === 'string' ? x : (x.name||x.user||x)) !== uname)]);
+                        }
+                    } catch(e) { /* ignore */ }
                 });
 
                 // Server uses GET_ROOM_CHAT_MES for returning room/person chat history
@@ -142,21 +161,37 @@ function Chat() {
 
                 websocketService.on('CREATE_ROOM', (data) => {
                     console.log('✓ Room creation response:', data);
-                    if (data) {
+                    try {
+                        if (data?.status === 'error') {
+                            setRoomCreateError(data.mes || 'Create room failed');
+                            return;
+                        }
                         let roomName = null;
-                        if (data.data) {
+                        if (data?.data) {
                             roomName = typeof data.data === 'string' ? data.data : data.data.name || null;
                         } else if (typeof data === 'string') {
                             roomName = data;
                         }
-
                         if (roomName) {
-                            setRooms(prev => [...prev, { name: roomName }]);
-                            console.log('✓ Room added:', roomName);
+                            // avoid duplicate
+                            setRooms(prev => {
+                                const exists = prev.some(r => (r.name || r) === roomName);
+                                return exists ? prev : [...prev, { name: roomName }];
+                            });
+                            setRoomCreateSuccess('Room created');
+                            setRoomCreateError('');
+                            setNewRoomName('');
+                            // Auto join and open the new room
+                            websocketService.send('JOIN_ROOM', { name: roomName });
+                            setSelectedRoom({ name: roomName });
+                            setSelectedUser(null);
+                            setMessages([]);
+                            websocketService.send('GET_ROOM_CHAT_MES', { name: roomName, page: 1 });
+                            console.log('✓ Room added and opened:', roomName);
                         } else {
                             console.log('CREATE_ROOM returned no room name');
                         }
-                    }
+                    } catch (e) { console.warn('CREATE_ROOM handler error', e); }
                 });
 
                 // Update joinedRooms when server confirms JOIN_ROOM
@@ -187,7 +222,8 @@ function Chat() {
         setSelectedRoom(null);
         setMessages([]);
         
-        websocketService.send('GET_ROOM_CHAT_MES', {
+        // For direct messages, request people chat history
+        websocketService.send('GET_PEOPLE_CHAT_MES', {
             name: personName,
             page: 1
         });
@@ -197,14 +233,37 @@ function Chat() {
         setSelectedRoom(room);
         setSelectedUser(null);
         setMessages([]);
+
+        const roomName = room.name || room;
+        // Ensure joined before loading history (some servers require joining first)
+        if (!joinedRooms.includes(roomName)) {
+            websocketService.send('JOIN_ROOM', { name: roomName });
+            setJoinedRooms(prev => (prev.includes(roomName) ? prev : [...prev, roomName]));
+        }
         
         websocketService.send('GET_ROOM_CHAT_MES', {
-            name: room.name || room,
+            name: roomName,
             page: 1
         });
     };
 
-    // create-room UI removed (server doesn't support create action)
+    // Create room handler
+    const handleCreateRoom = (e) => {
+        e?.preventDefault?.();
+        const name = (newRoomName || '').trim();
+        setRoomCreateError('');
+        setRoomCreateSuccess('');
+        if (!name) {
+            setRoomCreateError('Room name is required');
+            return;
+        }
+        const exists = rooms.some(r => (typeof r === 'string' ? r : (r.name || r)) === name);
+        if (exists) {
+            setRoomCreateError('Room already exists');
+            return;
+        }
+        websocketService.send('CREATE_ROOM', { name });
+    };
 
     const handleSendMessage = (e) => {
         e.preventDefault();
@@ -244,13 +303,15 @@ function Chat() {
     const handleSearchSubmit = () => {
         const name = searchTerm && searchTerm.trim();
         if (!name) return;
-        // For messages tab we query server for people matching the name
         if (tab === 'messages') {
+            // Call CHECK_USER to verify exact existence
+            websocketService.send('CHECK_USER', { user: name });
+            // Optional: still request list/messages by keyword for suggestions/history
             websocketService.send('GET_PEOPLE_CHAT_MES', { name, page: 1 });
         }
     };
 
-    const filteredConversations = showFallbackResults ? conversations : conversations.filter(conv => {
+    const filteredConversations = conversations.filter(conv => {
         const convName = typeof conv === 'string' ? conv : (conv.name || conv.to || '');
         const normalize = (s = '') => s.toString().normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
         return normalize(convName).includes(normalize(searchTerm));
@@ -327,7 +388,7 @@ function Chat() {
                                                             type="text"
                                                             placeholder="Search people..."
                                                             value={searchTerm}
-                                                            onChange={(e) => { setSearchTerm(e.target.value); setShowFallbackResults(false); }}
+                                                            onChange={(e) => { setSearchTerm(e.target.value); }}
                                                             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSearchSubmit(); } }}
                                                             className="search-input"
                                                         />
@@ -367,6 +428,21 @@ function Chat() {
                                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSearchSubmit(); } }}
                                     className="search-input"
                                 />
+                            </div>
+
+                            <div className="create-room-box">
+                                <form onSubmit={handleCreateRoom} className="create-room-form">
+                                    <input
+                                        type="text"
+                                        placeholder="New room name..."
+                                        value={newRoomName}
+                                        onChange={(e) => setNewRoomName(e.target.value)}
+                                        className="search-input"
+                                    />
+                                    <button type="submit" className="btn-send">Create</button>
+                                </form>
+                                {roomCreateError && <p className="error-message">{roomCreateError}</p>}
+                                {roomCreateSuccess && <p className="success-message">{roomCreateSuccess}</p>}
                             </div>
 
                             <div className="rooms-list">

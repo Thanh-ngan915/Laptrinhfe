@@ -46,24 +46,9 @@ function Register() {
                     websocketService.off('REGISTER');
                     setTimeout(() => navigate('/login'), 1200);
                 } else {
-                    // Fallback: nếu server không hỗ trợ REGISTER, lưu local và chuyển hướng
-                    const users = JSON.parse(localStorage.getItem('users') || '[]');
-                    if (users.some(u => u.email === formData.email)) {
-                        setError('Email này đã được đăng ký!');
-                        websocketService.off('REGISTER');
-                        return;
-                    }
-                    const newUser = {
-                        id: Date.now(),
-                        name: formData.name,
-                        email: formData.email,
-                        password: formData.password
-                    };
-                    users.push(newUser);
-                    localStorage.setItem('users', JSON.stringify(users));
-                    setSuccess('Đăng ký thành công (local)! Đang chuyển hướng...');
+                    const msg = (data && (data.mes || data.message)) || 'Đăng ký thất bại trên server';
+                    setError(msg);
                     websocketService.off('REGISTER');
-                    setTimeout(() => navigate('/login'), 1200);
                 }
             };
 
@@ -71,13 +56,7 @@ function Register() {
             websocketService.send('REGISTER', { user: formData.name, pass: formData.password });
         }).catch(err => {
             console.error('WS connect error', err);
-            setError('Không thể kết nối tới server, đã lưu local');
-            // fallback local save
-            const users = JSON.parse(localStorage.getItem('users') || '[]');
-            users.push({ id: Date.now(), name: formData.name, email: formData.email, password: formData.password });
-            localStorage.setItem('users', JSON.stringify(users));
-            setSuccess('Đăng ký thành công (local)! Đang chuyển hướng...');
-            setTimeout(() => navigate('/login'), 1200);
+            setError('Không thể kết nối tới server');
         });
     };
 
