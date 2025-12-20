@@ -9,38 +9,58 @@ function Login() {
     const [error, setError] = useState('');
     const navigate = useNavigate();
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
 
-        // Gửi yêu cầu đăng nhập tới server qua WebSocket
-        websocketService.connect().then(() => {
-            // register temporary listeners for login responses
-            const onReLogin = (data) => {
+        try {
+            // 1. Đợi kết nối thành công trước
+            await websocketService.connect();
+
+            // 2. Định nghĩa hàm xử lý kết quả login
+            const handleLoginResponse = (data) => {
                 console.log('Login response:', data);
-                if (data && (data.status === 'success' || data.event === 'RE_LOGIN' || data.status === 'ok')) {
+
+                // Logic kiểm tra thành công (bao gồm cả trường hợp server báo lỗi "đã login")
+                const isSuccess = data.status === 'success' || data.status === 'ok';
+                const isAlreadyLoggedIn = data.status === 'error' && data.mes === 'You are already logged in';
+
+                if (data && (isSuccess || data.event === 'RE_LOGIN' || isAlreadyLoggedIn)) {
+                    // Lưu thông tin user
                     const code = data.data?.RE_LOGIN_CODE || null;
-                    const userObj = { name: user, user: user, password: password, reLoginCode: code };
+                    const userObj = {
+                        name: user,
+                        user: user,
+                        password: password,
+                        reLoginCode: code
+                    };
+
                     localStorage.setItem('isAuthenticated', 'true');
                     localStorage.setItem('currentUser', JSON.stringify(userObj));
+
+                    // Dọn dẹp listeners trước khi chuyển trang
                     websocketService.off('RE_LOGIN');
                     websocketService.off('LOGIN');
+
                     navigate('/chat');
                 } else {
+                    // Xử lý thất bại
                     setError(data.mes || 'Đăng nhập thất bại');
-                    websocketService.off('RE_LOGIN');
-                    websocketService.off('LOGIN');
+                    // Không tắt listener vội, để user có thể thử lại
                 }
             };
 
-            websocketService.on('RE_LOGIN', onReLogin);
-            websocketService.on('LOGIN', onReLogin);
+            // 3. Đăng ký lắng nghe
+            websocketService.on('LOGIN', handleLoginResponse);
+            websocketService.on('RE_LOGIN', handleLoginResponse);
 
+            // 4. Gửi lệnh Login
             websocketService.send('LOGIN', { user: user, pass: password });
-        }).catch(err => {
+
+        } catch (err) {
             console.error('WS connect error', err);
-            setError('Không thể kết nối tới server');
-        });
+            setError('Không thể kết nối tới server. Vui lòng thử lại.');
+        }
     };
 
     return (
