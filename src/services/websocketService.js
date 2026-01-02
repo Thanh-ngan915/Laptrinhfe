@@ -1,193 +1,138 @@
-/**
- * WebSocket Service - Quản lý kết nối và giao tiếp với server
- * 
- * Cách hoạt động:
- * 1. Khởi tạo kết nối WebSocket tới server
- * 2. Gửi/nhận các events (đăng ký, tạo room, gửi tin nhắn, v.v.)
- * 3. Lắng nghe các sự kiện từ server
- */
-
 class WebSocketService {
     constructor() {
         this.ws = null;
         this.url = 'wss://chat.longapp.site/chat/chat';
-        this.listeners = {}; // Lưu các hàm callback
+        this.listeners = {};
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
+        this.attemptReconnect = this.attemptReconnect.bind(this);
+        this.connect = this.connect.bind(this);
+        // --------------------------------
     }
 
-    /**
-     * Kết nối WebSocket và setup listeners
-     */
     connect() {
         return new Promise((resolve, reject) => {
-            try {
-                // If already connected, resolve immediately
-                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                    console.log('WebSocket already connected');
-                    resolve();
-                    return;
-                }
-
-                this.ws = new WebSocket(this.url);
-
-                // Khi kết nối thành công
-                this.ws.onopen = () => {
-                    console.log('✓ Kết nối WebSocket thành công!');
-                    this.reconnectAttempts = 0;
-                    resolve();
-                };
-
-                // Khi nhận được message từ server
-                this.ws.onmessage = (event) => {
-                    try {
-                        const raw = JSON.parse(event.data);
-                        console.log('📨 Nhận từ server:', raw);
-
-                        // Normalize server message formats:
-                        // 1) Wrapped: { action: 'onchat', data: { event: 'EVENT', data: {...} } }
-                        // 2) Flat: { event: 'EVENT', status: 'success', data: {...} }
-                        // 3) Others: fallback to passing raw
-                        let eventKey = null;
-                        let payload = null;
-                        let normalized = null;
-
-                        if (raw && raw.action === 'onchat' && raw.data && typeof raw.data === 'object' && 'event' in raw.data) {
-                            eventKey = raw.data.event;
-                            payload = raw.data.data;
-                            normalized = {
-                                event: eventKey,
-                                status: raw.status || (payload && payload.status) || raw.data.status || undefined,
-                                mes: raw.mes || (payload && payload.mes) || undefined,
-                                data: payload
-                            };
-                        } else if (raw && (raw.event || raw.action)) {
-                            eventKey = raw.event || raw.action;
-                            normalized = raw;
-                        }
-
-                        // Deliver to specific listener if exists
-                        if (eventKey && this.listeners[eventKey]) {
-                            try { this.listeners[eventKey](normalized); } catch (err) { console.error('Listener error', err); }
-                        }
-
-                        // Also deliver to 'onchat' listener if someone subscribed directly
-                        if (raw && raw.action && this.listeners[raw.action]) {
-                            try { this.listeners[raw.action](raw); } catch (err) { console.error('Listener error', err); }
-                        }
-
-                        // Wildcard listener receives raw for full context
-                        if (this.listeners['*']) {
-                            try { this.listeners['*'](raw); } catch (err) { console.error('Wildcard listener error', err); }
-                        }
-                    } catch (error) {
-                        console.error('Lỗi parse message:', error);
-                    }
-                };
-
-                // Khi có lỗi
-                this.ws.onerror = (error) => {
-                    console.error('❌ Lỗi WebSocket:', error);
-                    reject(error);
-                };
-
-                // Khi kết nối đóng
-                this.ws.onclose = () => {
-                    console.log('Kết nối đã đóng');
-                    this.attemptReconnect();
-                };
-            } catch (error) {
-                reject(error);
+            if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+                resolve();
+                return;
             }
+
+            this.ws = new WebSocket(this.url);
+
+            this.ws.onopen = () => {
+                console.log('✓ Kết nối WebSocket thành công!');
+                this.reconnectAttempts = 0;
+                resolve();
+                // --- THÊM ĐOẠN NÀY: Báo ra ngoài là đã OPEN ---
+                if (this.listeners['OPEN']) {
+                    this.listeners['OPEN'].forEach(cb => cb());
+                }
+            };
+
+            this.ws.onmessage = (event) => {
+                this.handleMessage(event);
+            };
+
+            this.ws.onclose = () => {
+                console.log('Kết nối đã đóng. Đang gọi reconnect...');
+                if (this.listeners['CLOSE']) {
+                    this.listeners['CLOSE'].forEach(cb => cb());
+                }
+                this.attemptReconnect();
+            };
+
+            this.ws.onerror = (err) => {
+                console.error("WS Error", err);
+                // reject(err);
+            };
         });
     }
 
-    /**
-     * Thử kết nối lại
-     */
+    handleMessage(event) {
+        try {
+            const raw = JSON.parse(event.data);
+
+            if (raw.action === 'error') return;
+
+            let eventKey = null;
+            let normalized = raw;
+
+            if (raw && raw.action === 'onchat' && raw.data && typeof raw.data === 'object' && 'event' in raw.data) {
+                eventKey = raw.data.event;
+                normalized = {
+                    event: eventKey,
+                    status: raw.status || raw.data.status,
+                    mes: raw.mes || raw.data.mes,
+                    data: raw.data.data
+                };
+            } else if (raw && (raw.event || raw.action)) {
+                eventKey = raw.event || raw.action;
+            }
+
+            if (eventKey && this.listeners[eventKey]) {
+                this.listeners[eventKey].forEach(cb => {
+                    try { cb(normalized); } catch (e) { console.error(e); }
+                });
+            }
+
+            if (this.listeners['*']) {
+                this.listeners['*'].forEach(cb => cb(raw));
+            }
+        } catch (error) {
+            console.error('Lỗi parse message:', error);
+        }
+    }
+
     attemptReconnect() {
         if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
             console.log(`Thử kết nối lại... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
-            setTimeout(() => this.connect(), 3000);
+
+            setTimeout(() => {
+                this.connect().catch(err => console.log("Reconnect failed:", err));
+            }, 3000);
+        } else {
+            console.log("Đã thử kết nối lại quá số lần quy định.");
         }
     }
 
-    /**
-     * Gửi message tới server
-     * @param {string} action - Tên action (LOGIN, REGISTER, SEND_CHAT, v.v.)
-     * @param {object} data - Dữ liệu gửi đi
-     */
     send(action, data = {}) {
-        if (!(this.ws && this.ws.readyState === WebSocket.OPEN)) {
-            console.error('WebSocket chưa kết nối!');
-            return;
-        }
+        if (!(this.ws && this.ws.readyState === WebSocket.OPEN)) return;
 
-        // Một số action của server yêu cầu wrapper: { action: 'onchat', data: { event: '<EVENT>', data: {...} } }
         const chatEvents = new Set([
             'REGISTER', 'LOGIN', 'RE_LOGIN', 'LOGOUT', 'CREATE_ROOM', 'JOIN_ROOM',
-            'GET_ROOM_CHAT_MES', 'GET_PEOPLE_CHAT_MES', 'SEND_CHAT', 'CHECK_USER', 'GET_USER_LIST'
+            'GET_ROOM_CHAT_MES', 'GET_PEOPLE_CHAT_MES', 'SEND_CHAT', 'CHECK_USER', 'GET_USER_LIST',
+            'CHECK_USER_ONLINE', 'CHECK_USER_EXIST'
         ]);
 
         let messageToSend;
         if (action === 'onchat') {
-            // caller already provided full wrapper
-            messageToSend = Object.assign({ action: 'onchat' }, { data: data });
+            messageToSend = { action: 'onchat', data: data };
         } else if (chatEvents.has(action)) {
-            messageToSend = {
-                action: 'onchat',
-                data: {
-                    event: action,
-                    data: data
-                }
-            };
+            messageToSend = { action: 'onchat', data: { event: action, data: data } };
         } else {
-            // default fallback: send as-is
-            messageToSend = {
-                action: action,
-                data: data
-            };
+            messageToSend = { action: action, data: data };
         }
 
-        console.log('📤 Gửi tới server:', messageToSend);
+        console.log(`📤 Gửi:`, messageToSend);
         this.ws.send(JSON.stringify(messageToSend));
     }
 
-    /**
-     * Lắng nghe một event cụ thể
-     * @param {string} action - Tên event cần lắng nghe
-     * @param {function} callback - Hàm được gọi khi nhận event
-     */
     on(action, callback) {
-        this.listeners[action] = callback;
+        if (!this.listeners[action]) this.listeners[action] = [];
+        this.listeners[action].push(callback);
     }
 
-    /**
-     * Bỏ lắng nghe một event
-     * @param {string} action - Tên event
-     */
-    off(action) {
-        delete this.listeners[action];
+    off(action, callback) {
+        if (!this.listeners[action]) return;
+        if (!callback) delete this.listeners[action];
+        else this.listeners[action] = this.listeners[action].filter(cb => cb !== callback);
     }
 
-    /**
-     * Đóng kết nối WebSocket
-     */
     disconnect() {
-        if (this.ws) {
-            this.ws.close();
-        }
-    }
-
-    /**
-     * Kiểm tra trạng thái kết nối
-     */
-    isConnected() {
-        return this.ws && this.ws.readyState === WebSocket.OPEN;
+        if (this.ws) this.ws.close();
     }
 }
 
-// Create instance and export (ESLint prefers assigning before export)
 const websocketService = new WebSocketService();
 export default websocketService;
