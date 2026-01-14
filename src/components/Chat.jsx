@@ -176,35 +176,72 @@ function Chat() {
     const filteredConversations = filterConversations(conversations, searchTerm);
     const filteredRooms = filterRooms(rooms, searchTerm);
 
+    // Gửi JOIN_ROOM khi tìm phòng theo tên ở tab Rooms
+    const handleRoomSearchSubmit = useCallback(() => {
+        if (tab !== 'rooms') return;
+        const roomName = (searchTerm || '').trim();
+        if (!roomName) return;
+
+        websocketService.send('JOIN_ROOM', { name: roomName });
+        dispatch(setSelectedRoom({ name: roomName }));
+        try { localStorage.setItem('selectedChat', JSON.stringify({ type: 'room', value: roomName })); } catch(e){}
+    }, [tab, searchTerm, dispatch]);
+
     // Xử lý Gửi tin nhắn
     const handleSendMessage = (e) => {
         e.preventDefault();
         if (!newMessage.trim()) return;
 
+        // Ensure room messages are sent with type 'room'
+        // 1) If a room is explicitly selected, send as room.
+        // 2) If no selectedRoom but selectedUser trùng tên một room trong state (so sánh trim), vẫn gửi type 'room'.
+        const matchedRoomName = (() => {
+            if (selectedRoom) return (selectedRoom.name || selectedRoom || '').toString().trim();
+            if (selectedUser) {
+                const su = selectedUser.toString().trim();
+                const found = rooms.find(r => (r?.name || r || '').toString().trim() === su);
+                if (found) return (found.name || found || '').toString().trim();
+            }
+            return null;
+        })();
+
+        if (matchedRoomName) {
+            websocketService.send('SEND_CHAT', {
+                type: 'room',
+                to: matchedRoomName,
+                mes: newMessage,
+            });
+
+            const optimistic = {
+                from: currentUser.name || currentUser.username || 'You',
+                mes: newMessage,
+                time: new Date().toLocaleTimeString(),
+                to: matchedRoomName,
+                type: 'room',
+            };
+            dispatch(addMessage(optimistic));
+            dispatch(setNewMessage(''));
+            return;
+        }
+
         if (selectedUser) {
             websocketService.send('SEND_CHAT', {
                 type: 'people',
                 to: selectedUser,
-                mes: newMessage
+                mes: newMessage,
             });
-        } else if (selectedRoom) {
-            const roomName = selectedRoom.name || selectedRoom;
-            websocketService.send('SEND_CHAT', {
-                type: 'room',
-                to: roomName,
-                mes: newMessage
-            });
+
+            const optimistic = {
+                from: currentUser.name || currentUser.username || 'You',
+                mes: newMessage,
+                time: new Date().toLocaleTimeString(),
+                to: selectedUser,
+                type: 'people',
+            };
+            dispatch(addMessage(optimistic));
+            dispatch(setNewMessage(''));
+            return;
         }
-        // Optimistically add the message locally so sender sees it immediately
-        const optimistic = {
-            from: currentUser.name || currentUser.username || 'You',
-            mes: newMessage,
-            time: new Date().toLocaleTimeString(),
-            to: selectedUser || (selectedRoom ? (selectedRoom.name || selectedRoom) : null),
-            type: selectedUser ? 'people' : 'room',
-        };
-        dispatch(addMessage(optimistic));
-        dispatch(setNewMessage(''));
     };
 
     // Xử lý Tạo phòng
@@ -249,13 +286,16 @@ function Chat() {
                     rooms={filteredRooms}
                     selectedRoom={selectedRoom}
                     onSelectRoom={useCallback((room) => {
+                        const roomName = room?.name || room;
+                        // Gửi JOIN_ROOM mỗi khi chọn phòng để đảm bảo đã join và lấy chatData mới nhất
+                        websocketService.send('JOIN_ROOM', { name: roomName });
                         dispatch(setSelectedRoom(room));
                         try { localStorage.setItem('selectedChat', JSON.stringify({ type: 'room', value: room })); } catch(e){}
                     }, [dispatch])}
                     searchTerm={searchTerm}
                     searchStatus={searchStatus}
                     onSearchTermChange={useCallback((val) => dispatch(setSearchTerm(val)), [dispatch])}
-                    onSearchSubmit={useCallback(() => {}, [])}
+                    onSearchSubmit={handleRoomSearchSubmit}
                     newRoomName={newRoomName}
                     onNewRoomNameChange={useCallback((val) => dispatch(setNewRoomName(val)), [dispatch])}
                     onCreateRoom={handleCreateRoom}
