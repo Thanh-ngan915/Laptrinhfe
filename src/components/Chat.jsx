@@ -27,6 +27,32 @@ import ChatSidebar from './Chat/ChatSidebar';
 import ChatContent from './Chat/ChatContent';
 import './Chat.css';
 
+const uploadToCloudinary = async (file) => {
+    const cloudName = "dqghfi8be";
+    const uploadPreset = "appchat";
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("upload_preset", uploadPreset);
+
+    let resourceType = "image";
+    if (file.type.includes("video") || file.type.includes("audio")) {
+        resourceType = "video";
+    }
+
+    try {
+        const response = await fetch(
+            `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`,
+            { method: "POST", body: formData }
+        );
+        const data = await response.json();
+        return data.secure_url;
+    } catch (error) {
+        console.error("Lỗi upload:", error);
+        return null;
+    }
+};
+
 function Chat() {
     const dispatch = useDispatch();
     const navigate = useNavigate();
@@ -150,7 +176,6 @@ function Chat() {
         };
     }, []);
 
-    // Logic Search
     const filteredConversations = filterConversations(conversations, searchTerm);
     const filteredRooms = filterRooms(rooms, searchTerm);
 
@@ -167,7 +192,6 @@ function Chat() {
     const handleSendMessage = (e) => {
         e.preventDefault();
         if (!newMessage.trim()) return;
-
 
         const matchedRoomName = (() => {
             if (selectedRoom) return (selectedRoom.name || selectedRoom || '').toString().trim();
@@ -215,6 +239,57 @@ function Chat() {
             dispatch(addMessage(optimistic));
             dispatch(setNewMessage(''));
             return;
+        }
+    };
+    const handleSendFile = async (file) => {
+        if (!file) return;
+
+        try {
+            console.log("⏳ Đang upload lên Cloudinary...");
+            // Gọi hàm upload thay vì nén ảnh
+            const fileUrl = await uploadToCloudinary(file);
+
+            if (!fileUrl) {
+                alert("Upload thất bại!");
+                return;
+            }
+
+            const matchedRoomName = (() => {
+                if (selectedRoom) return (selectedRoom.name || selectedRoom || '').toString().trim();
+                if (selectedUser) {
+                    const su = selectedUser.toString().trim();
+                    const found = rooms.find(r => (r?.name || r || '').toString().trim() === su);
+                    if (found) return (found.name || found || '').toString().trim();
+                }
+                return null;
+            })();
+
+            const optimisticMsg = {
+                from: currentUser.name || currentUser.username || 'You',
+                mes: fileUrl, // <--- Giờ là URL chứ không phải Base64
+                time: new Date().toLocaleTimeString(),
+                to: matchedRoomName || selectedUser,
+                type: matchedRoomName ? 'room' : 'people',
+            };
+
+            if (matchedRoomName) {
+                websocketService.send('SEND_CHAT', {
+                    type: 'room',
+                    to: matchedRoomName,
+                    mes: fileUrl,
+                });
+                dispatch(addMessage(optimisticMsg));
+            } else if (selectedUser) {
+                websocketService.send('SEND_CHAT', {
+                    type: 'people',
+                    to: selectedUser,
+                    mes: fileUrl,
+                });
+                dispatch(addMessage(optimisticMsg));
+            }
+
+        } catch (error) {
+            console.error("Lỗi gửi file:", error);
         }
     };
 
@@ -282,6 +357,7 @@ function Chat() {
                     newMessage={newMessage}
                     onNewMessageChange={(val) => dispatch(setNewMessage(val))}
                     onSendMessage={handleSendMessage}
+                    onSendImage={handleSendFile}
                     tab={tab}
                     messagesEndRef={messagesEndRef}
                 />
@@ -291,4 +367,3 @@ function Chat() {
 }
 
 export default Chat;
-//fix conflict
