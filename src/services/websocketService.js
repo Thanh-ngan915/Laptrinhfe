@@ -1,140 +1,138 @@
-/**
- * WebSocketService - Single Class Version
- * Kế thừa EventTarget để sử dụng cơ chế event native của trình duyệt.
- */
-class WebSocketService extends EventTarget {
+class WebSocketService {
     constructor() {
-        super();
-        this.url = 'wss://chat.longapp.site/chat/chat';
         this.ws = null;
+        this.url = 'wss://chat.longapp.site/chat/chat';
+        this.listeners = {};
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 5;
 
-        this.retryCount = 0;
-        this.maxRetries = 5;
-        this.retryTimer = null;
-
-        this.chatEvents = new Set([
-            'REGISTER', 'LOGIN', 'RE_LOGIN', 'LOGOUT', 'CREATE_ROOM', 'JOIN_ROOM',
-            'GET_ROOM_CHAT_MES', 'GET_PEOPLE_CHAT_MES', 'SEND_CHAT', 'CHECK_USER',
-            'GET_USER_LIST', 'CHECK_USER_ONLINE', 'CHECK_USER_EXIST'
-        ]);
+        this.attemptReconnect = this.attemptReconnect.bind(this);
+        this.connect = this.connect.bind(this);
     }
-
-    // --- PUBLIC METHODS ---
-
+    // kết nối
     connect() {
-        if (this.ws && [WebSocket.OPEN, WebSocket.CONNECTING].includes(this.ws.readyState)) {
-            return Promise.resolve();
-        }
-
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
+            // tránh tạo trùng
+            if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+                resolve();
+                return;
+            }
+            // tạo ws
             this.ws = new WebSocket(this.url);
 
             this.ws.onopen = () => {
-                console.log('✓ WS Connected');
-                this.retryCount = 0;
+                console.log('✓ Kết nối WebSocket thành công!');
+                this.reconnectAttempts = 0;// đếm số lần reconnect thành công
                 resolve();
-                this._dispatch('OPEN');
+                if (this.listeners['OPEN']) {
+                    this.listeners['OPEN'].forEach(cb => cb());
+                }
             };
-
             this.ws.onmessage = (event) => {
-                this._handleMessage(event);
+                this.handleMessage(event);// sử lí message
             };
 
             this.ws.onclose = () => {
-                console.log('WS Closed. Reconnecting...');
-                this._dispatch('CLOSE');
-                this._attemptReconnect();
+                console.log('Kết nối đã đóng. Đang gọi reconnect...');
+                if (this.listeners['CLOSE']) {
+                    this.listeners['CLOSE'].forEach(cb => cb());// báo cho UI biết đã đóng
+                }
+                this.attemptReconnect();// tự động reconnect
             };
 
             this.ws.onerror = (err) => {
                 console.error("WS Error", err);
+                // reject(err);
             };
         });
     }
-
-    send(action, data = {}) {
-        if (this.ws?.readyState !== WebSocket.OPEN) {
-            console.warn('⚠️ Cannot send. WS is not OPEN.');
-            return;
-        }
-
-        const payload = this._formatPayload(action, data);
-        console.log(`📤 Sending [${action}]:`, payload);
-        this.ws.send(JSON.stringify(payload));
-    }
-
-    disconnect() {
-        if (this.retryTimer) clearTimeout(this.retryTimer);
-        if (this.ws) {
-            this.ws.onclose = null;
-            this.ws.close();
-        }
-        this.ws = null;
-    }
-
-
-    _handleMessage(event) {
+    // xử lí message(sẻver gửi về)
+    handleMessage(event) {
         try {
             const raw = JSON.parse(event.data);
-            if (!raw || raw.action === 'error') return;
+            // bỏ qua lỗi
+            if (raw.action === 'error') return;
+            // chuẩn hóa message
+            let eventKey = null;
+            let normalized = raw;
 
-            let type = null;
-            let detail = raw;
-
-            if (raw.action === 'onchat' && raw.data?.event) {
-                type = raw.data.event;
-                // Làm phẳng data (Flatten) để bên ngoài dễ dùng
-                const payload = (raw.data.data) ?? raw.data;
-                detail = {
-                    event: type,
+            // Logic chuẩn hóa message
+            if (raw && raw.action === 'onchat' && raw.data && typeof raw.data === 'object' && 'event' in raw.data) {
+                eventKey = raw.data.event;
+                const payload = (raw.data && typeof raw.data === 'object') ? (raw.data.data ?? raw.data) : raw.data;
+                normalized = {
+                    event: eventKey,
                     status: raw.status || payload?.status || raw.data?.status,
                     mes: raw.mes || payload?.mes || raw.data?.mes,
                     data: payload?.data ?? payload
                 };
+            } else if (raw && (raw.event || raw.action)) {
+                eventKey = raw.event || raw.action;
             }
-            else if (raw.event || raw.action) {
-                type = raw.event || raw.action;
+            //sk và nhừn cb dk lắng nghe sk
+            if (eventKey && this.listeners[eventKey]) {
+                this.listeners[eventKey].forEach(cb => {
+                    try { cb(normalized); } catch (e) { console.error(e); }
+                });
             }
-
-            if (type) {
-                this._dispatch(type, detail);
+            // lắng nghe tất cả, trả về dl gốc
+            if (this.listeners['*']) {
+                this.listeners['*'].forEach(cb => cb(raw));
             }
-
-            this._dispatch('*', raw);
-
         } catch (error) {
-            console.error('Parse Message Error:', error);
+            console.error('Lỗi parse message:', error);
         }
     }
 
-    _formatPayload(action, data) {
+    // tự động reconnect
+    attemptReconnect() {
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+            this.reconnectAttempts++;
+            console.log(`Thử kết nối lại... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+
+            setTimeout(() => {
+                this.connect().catch(err => console.log("Reconnect failed:", err));
+            }, 3000);
+        } else {
+            console.log("Đã thử kết nối lại quá số lần quy định.");
+        }
+    }
+    // gửi message từ client lên server,formart chuẩn
+    send(action, data = {}) {
+        if (!(this.ws && this.ws.readyState === WebSocket.OPEN)) return;
+
+        const chatEvents = new Set([
+            'REGISTER', 'LOGIN', 'RE_LOGIN', 'LOGOUT', 'CREATE_ROOM', 'JOIN_ROOM',
+            'GET_ROOM_CHAT_MES', 'GET_PEOPLE_CHAT_MES', 'SEND_CHAT', 'CHECK_USER', 'GET_USER_LIST',
+            'CHECK_USER_ONLINE', 'CHECK_USER_EXIST'
+        ]);
+
+        let messageToSend; // biến gửi đi , formart để gửi lên server
         if (action === 'onchat') {
-            return { action: 'onchat', data: data };
+            messageToSend = { action: 'onchat', data: data };
+        } else if (chatEvents.has(action)) {
+            messageToSend = { action: 'onchat', data: { event: action, data: data } };
+        } else {
+            messageToSend = { action: action, data: data };
         }
 
-        if (this.chatEvents.has(action)) {
-            return { action: 'onchat', data: { event: action, data: data } };
-        }
-
-        // Mặc định
-        return { action: action, data: data };
+        console.log(`📤 Gửi:`, messageToSend);
+        this.ws.send(JSON.stringify(messageToSend));//ws chỉ nhấn string
+    }
+    //dk
+    on(action, callback) {
+        if (!this.listeners[action]) this.listeners[action] = [];
+        this.listeners[action].push(callback);
+    }
+    //hủy đk
+    off(action, callback) {
+        if (!this.listeners[action]) return;// k có listeners thì thôi
+        if (!callback) delete this.listeners[action];// k truyền callback
+        else this.listeners[action] = this.listeners[action].filter(cb => cb !== callback);//chia bỏ callback cụ thể
     }
 
-    _attemptReconnect() {
-        if (this.retryCount >= this.maxRetries) {
-            console.error('❌ Max retries reached. Stopping reconnect.');
-            return;
-        }
-
-        this.retryCount++;
-        const timeout = Math.min(1000 * (2 ** this.retryCount), 30000);
-
-        console.log(`🔄 Retry ${this.retryCount}/${this.maxRetries} in ${timeout/1000}s...`);
-        this.retryTimer = setTimeout(() => this.connect(), timeout);
-    }
-
-    _dispatch(type, detail) {
-        this.dispatchEvent(new CustomEvent(type, { detail }));
+    disconnect() {
+        if (this.ws) this.ws.close();
     }
 }
 

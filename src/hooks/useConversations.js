@@ -15,19 +15,22 @@ const useConversations = (isAuthenticated, currentUser) => {
   const selectedUser = useSelector(state => state.chat.selectedUser);
   const selectedRoom = useSelector(state => state.chat.selectedRoom);
 
-    useEffect(() => {
-        if (isAuthenticated && currentUser) {
-            try {
-                const userName = currentUser.name || currentUser.user || currentUser.email;
-                console.log('Đã xác thực, đang lấy dữ liệu cho:', userName);
-                setTimeout(() => {
-                    websocketService.send('GET_USER_LIST', {});
-                }, 500);
-            } catch (err) {
-                console.warn('Lỗi khi gửi request:', err);
-            }
-        }
-    }, [isAuthenticated, currentUser]);
+  useEffect(() => {
+    if (isAuthenticated && currentUser) {
+      try {
+        const userName = currentUser.name || currentUser.user || currentUser.email;
+        console.log('Đã xác thực, đang lấy dữ liệu cho:', userName);
+
+
+        setTimeout(() => {
+          websocketService.send('GET_USER_LIST', {});
+        }, 500);
+
+      } catch (err) {
+        console.warn('Lỗi khi gửi request:', err);
+      }
+    }
+  }, [isAuthenticated, currentUser]);
 
   useEffect(() => {
     const handlePeopleChatMes = (data) => {
@@ -60,26 +63,23 @@ const useConversations = (isAuthenticated, currentUser) => {
           return;
         }
 
-        // Parse danh sách người và phòng
         const { people, rooms } = parseConversationsFromResponse(data.data);
         dispatch(setConversations(people));
         dispatch(setRooms(rooms));
       }
     };
 
-      const handleUserList = (data) => {
-          try {
-              if (data.data && Array.isArray(data.data)) {
-                  const allUsers = data.data.map(u => u.name || u.user || u);
-
-                  dispatch(setConversations(allUsers));
-
-
-              }
-          } catch (e) {
-              console.warn('Lỗi xử lý GET_USER_LIST', e);
-          }
-      };
+    const handleUserList = (data) => {
+      try {
+        if (data.data && Array.isArray(data.data)) {
+          const { people, rooms } = parseConversationsFromResponse(data.data);
+          dispatch(setConversations(people));
+          dispatch(setRooms(rooms));
+        }
+      } catch (e) {
+        console.warn('Lỗi xử lý GET_USER_LIST', e);
+      }
+    };
     const handleCheckUser = (res) => {
       try {
         const status = res?.status || res?.data?.status;
@@ -104,6 +104,7 @@ const useConversations = (isAuthenticated, currentUser) => {
       websocketService.off('CHECK_USER', handleCheckUser);
     };
   }, [dispatch, searchTerm]);
+
   useEffect(() => {
     if (!selectedUser || !currentUser) return;
     try {
@@ -120,6 +121,7 @@ const useConversations = (isAuthenticated, currentUser) => {
     if (!selectedRoom) return;
     try {
       const roomName = selectedRoom.name || selectedRoom;
+      // Một số server mong muốn key 'name' thay vì 'room'
       websocketService.send('GET_ROOM_CHAT_MES', { name: roomName, page: 1 });
     } catch (e) {
       console.warn('Lỗi khi gửi GET_ROOM_CHAT_MES cho selectedRoom', e);

@@ -13,20 +13,19 @@ function Register() {
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
     const navigate = useNavigate();
-
+    //sk người dùng gõ vào input
     const handleChange = (e) => {
         setFormData({
-            ...formData,
-            [e.target.name]: e.target.value
+            ...formData,// toàn bộ giá trị cũ
+            [e.target.name]: e.target.value // cập nhật giá trị mới
         });
     };
-
+    // nhấn dk
     const handleSubmit = (e) => {
-        e.preventDefault();
+        e.preventDefault();// chặn reload trang
         setError('');
         setSuccess('');
 
-        // Validation
         if (formData.password !== formData.confirmPassword) {
             setError('Mật khẩu xác nhận không khớp!');
             return;
@@ -37,8 +36,9 @@ function Register() {
             return;
         }
 
-        // Thử đăng ký trên server qua WebSocket
+        // đăng ký trên server qua WebSocket
         websocketService.connect().then(() => {
+            //đăng ký callback REGISTER để xử lý phản hồi từ server
             const onRegister = (data) => {
                 console.log('Register response:', data);
                 if (data && (data.status === 'success' || data.event === 'RE_LOGIN')) {
@@ -51,7 +51,7 @@ function Register() {
                     websocketService.off('REGISTER');
                 }
             };
-
+            //dk lắng nghe sự kiện register
             websocketService.on('REGISTER', onRegister);
             websocketService.send('REGISTER', { user: formData.name, pass: formData.password });
         }).catch(err => {

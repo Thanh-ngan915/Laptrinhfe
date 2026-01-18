@@ -7,36 +7,37 @@ function Login() {
     const [user, setUser] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
-    const navigate = useNavigate();
-
+    const navigate = useNavigate();//chuyển trang
+    //nhấn đk hàm chạy
     const handleSubmit = (e) => {
-        e.preventDefault();
+        e.preventDefault();// chặn reload trang
         setError('');
-
+        // Kết nối WS và gửi yêu cầu đăng nhập
         websocketService.connect().then(() => {
+            //dc goi khi server gửi login và relogin
             const onReLogin = (data) => {
                 console.log('Login response:', data);
 
-                // Logic check mở rộng
+                //kt
                 const isSuccess = data.status === 'success' || data.status === 'ok';
                 const isAlreadyLoggedIn = data.mes === 'You are already logged in';
-                const isReLogin = data.event === 'RE_LOGIN';
+                const isReLogin = data.event === 'RE_LOGIN';//yc reLogin
 
                 if (data && (isSuccess || isReLogin || isAlreadyLoggedIn)) {
-                    // Thành công
+                    // Thành công: chỉ lưu thông tin cần thiết, không lưu mật khẩu
                     const code = data.data?.RE_LOGIN_CODE || null;
-                    const userObj = { name: user, user: user, password: password, reLoginCode: code };
+                    const userObj = { name: user, user: user, reLoginCode: code };
                     localStorage.setItem('isAuthenticated', 'true');
                     localStorage.setItem('currentUser', JSON.stringify(userObj));
 
-                    // Cleanup đúng cách
+                    // dọn listeners sau khi đn và chuyển trang
                     websocketService.off('RE_LOGIN', onReLogin);
                     websocketService.off('LOGIN', onReLogin);
 
                     navigate('/chat');
                 } else {
                     // Thất bại
-                    setError(data.mes || 'Đăng nhập thất bại');
+                    setError(data.mes || 'Đăng nhập thất bại');//báo lỗi
                     websocketService.off('RE_LOGIN', onReLogin);
                     websocketService.off('LOGIN', onReLogin);
                 }
