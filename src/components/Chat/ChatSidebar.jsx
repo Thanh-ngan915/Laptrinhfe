@@ -46,39 +46,36 @@ function ChatSidebar({
                                 <span style={{ color: '#999' }}>⏳ Đang kiểm tra...</span>
                             )}
 
-                            {/* --- KHU VỰC HIỂN THỊ KẾT QUẢ TÌM KIẾM (GIAO DIỆN MỚI) --- */}
+                            {/* --- hiển thị kết quả tìm kiếm --- */}
                             {searchTerm && searchStatus === 'exist' && (
                                 <div
                                     className="search-result-item"
                                     onClick={() => {
                                         // Bấm vào là chọn người đó để chat luôn
                                         onSelectUser(searchTerm);
-                                        // Tùy chọn: Xóa ô tìm kiếm sau khi chọn
-                                        // onSearchTermChange('');
                                     }}
                                     style={{
                                         display: 'flex',
                                         alignItems: 'center',
                                         padding: '10px 15px',
                                         cursor: 'pointer',
-                                        backgroundColor: '#e3f2fd', // Màu nền xanh nhạt nổi bật
+                                        backgroundColor: '#e3f2fd',
                                         borderRadius: '10px',
                                         marginTop: '10px',
                                         marginBottom: '10px',
                                         border: '1px solid #90caf9',
                                         transition: 'all 0.2s'
                                     }}
-                                    // Hiệu ứng hover
                                     onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#bbdefb'}
                                     onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#e3f2fd'}
                                 >
-                                    {/* 1. AVATAR (Lấy chữ cái đầu làm avatar) */}
+                                    {/* Avatar: Lấy chữ cái đầu làm avatar */}
                                     <div style={{ position: 'relative', marginRight: '15px' }}>
                                         <div style={{
                                             width: '45px',
                                             height: '45px',
                                             borderRadius: '50%',
-                                            backgroundColor: '#2196F3', // Màu xanh dương giống ảnh
+                                            backgroundColor: '#2196F3',
                                             color: 'white',
                                             display: 'flex',
                                             alignItems: 'center',
@@ -95,7 +92,7 @@ function ChatSidebar({
                                             width: '12px',
                                             height: '12px',
                                             borderRadius: '50%',
-                                            backgroundColor: '#4CAF50', // Màu xanh lá
+                                            backgroundColor: '#4CAF50',
                                             border: '2px solid white',
                                             position: 'absolute',
                                             bottom: '0',
@@ -103,7 +100,7 @@ function ChatSidebar({
                                         }}></div>
                                     </div>
 
-                                    {/* 2. THÔNG TIN (Tên + Trạng thái) */}
+                                    {/* 2. Thông tin: Tên + Trạng thái */}
                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
                     <span style={{
                         fontWeight: 'bold',
@@ -114,7 +111,7 @@ function ChatSidebar({
                     </span>
                                         <span style={{
                                             fontSize: '12px',
-                                            color: '#4CAF50', // Chữ màu xanh lá
+                                            color: '#4CAF50',
                                             fontWeight: '500'
                                         }}>
                         Active now
@@ -123,7 +120,7 @@ function ChatSidebar({
                                 </div>
                             )}
 
-                            {/* Giữ lại thông báo lỗi nếu không tìm thấy */}
+                            {/*thông báo lỗi nếu không tìm thấy */}
                             {searchTerm && searchStatus === 'not_found' && (
                                 <div style={{ padding: '10px', color: 'red', fontSize: '13px', textAlign: 'center' }}>
                                     ❌ Không tìm thấy người dùng "{searchTerm}"
