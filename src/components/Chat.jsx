@@ -3,14 +3,12 @@ import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import websocketService from '../services/websocketService';
 
-// --- 1. IMPORT CÁC HOOKS ---
 import useWebSocket from '../hooks/useWebSocket';
 import useAuth from '../hooks/useAuth';
 import useRooms from '../hooks/useRooms';
 import useMessages from '../hooks/useMessages';
 import useConversations from '../hooks/useConversations';
 
-// --- 2. IMPORT REDUX ACTIONS ---
 import {
     setIsConnected,
     setTab,
@@ -23,12 +21,37 @@ import {
 } from '../redux/slices/chatSlice';
 import { addMessage } from '../redux/slices/chatSlice';
 
-// --- 3. IMPORT UTILS & COMPONENTS ---
 import { filterConversations, filterRooms } from '../utils/chatUtils';
 import ChatHeader from './Chat/ChatHeader';
 import ChatSidebar from './Chat/ChatSidebar';
 import ChatContent from './Chat/ChatContent';
 import './Chat.css';
+
+const uploadToCloudinary = async (file) => {
+    const cloudName = "dqghfi8be";
+    const uploadPreset = "appchat";
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("upload_preset", uploadPreset);
+
+    let resourceType = "image";
+    if (file.type.includes("video") || file.type.includes("audio")) {
+        resourceType = "video";
+    }
+
+    try {
+        const response = await fetch(
+            `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`,
+            { method: "POST", body: formData }
+        );
+        const data = await response.json();
+        return data.secure_url;
+    } catch (error) {
+        console.error("Lỗi upload:", error);
+        return null;
+    }
+};
 
 function Chat() {
     const dispatch = useDispatch();
@@ -36,10 +59,8 @@ function Chat() {
     const messagesEndRef = useRef(null);
 
     const [searchStatus, setSearchStatus] = React.useState(null);
-    // null: chưa tìm, 'checking': đang tìm, 'exist': có, 'not_found': không có
     const searchTimeoutRef = useRef(null);
 
-    // --- 4. LẤY DATA TỪ REDUX ---
     const {
         isConnected,
         isAuthenticated,
@@ -56,20 +77,16 @@ function Chat() {
         roomCreateSuccess,
     } = useSelector(state => state.chat);
 
-    // --- SỬA LỖI CÚ PHÁP TẠI ĐÂY ---
-    // Bạn đã thiếu dấu }, [] ở đoạn trước
     const currentUser = useMemo(() => {
         return JSON.parse(localStorage.getItem('currentUser') || '{}');
-    }, []); // <--- QUAN TRỌNG: Phải đóng ngoặc và có mảng rỗng []
+    }, []);
 
-    // --- 5. GỌI HOOKS (Phải nằm ngoài useMemo) ---
     useWebSocket();
     useAuth(currentUser);
     useConversations(isAuthenticated, currentUser);
     useRooms();
     useMessages();
 
-    // --- 6. CÁC HÀM XỬ LÝ SỰ KIỆN ---
     useEffect(() => {
         const handleOpen = () => {
             console.log("Status: Online");
@@ -81,23 +98,19 @@ function Chat() {
             dispatch(setIsConnected(false));
         };
 
-        // Đăng ký lắng nghe sự kiện OPEN/CLOSE từ Service
         websocketService.on('OPEN', handleOpen);
         websocketService.on('CLOSE', handleClose);
 
-        // Kiểm tra ngay lập tức (đề phòng socket đã kết nối xong trước khi Chat mount)
         if (websocketService.ws?.readyState === WebSocket.OPEN) {
             dispatch(setIsConnected(true));
         }
 
-        // Cleanup khi thoát
         return () => {
             websocketService.off('OPEN', handleOpen);
             websocketService.off('CLOSE', handleClose);
         };
     }, [dispatch]);
 
-    // Khôi phục lựa chọn chat trước đó (nếu có) sau reload
     useEffect(() => {
         try {
             const stored = localStorage.getItem('selectedChat');
@@ -114,28 +127,22 @@ function Chat() {
         }
     }, [dispatch]);
 
-    // Tự động cuộn xuống tin nhắn mới
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
-    // 1. Logic Debounce & Gọi API khi gõ phím
     useEffect(() => {
-        // Nếu ô tìm kiếm rỗng -> Reset trạng thái
         if (!searchTerm || searchTerm.trim() === '') {
             setSearchStatus(null);
             return;
         }
 
-        // Đánh dấu là đang kiểm tra
         setSearchStatus('checking');
 
-        // Xóa timeout cũ nếu người dùng gõ liên tục
         if (searchTimeoutRef.current) {
             clearTimeout(searchTimeoutRef.current);
         }
 
-        // Đợi 500ms ngừng gõ mới gọi API
         searchTimeoutRef.current = setTimeout(() => {
             websocketService.send('CHECK_USER_EXIST', { user: searchTerm });
         }, 500);
@@ -143,7 +150,6 @@ function Chat() {
         return () => clearTimeout(searchTimeoutRef.current);
     }, [searchTerm]);
 
-    // 2. Logic Nhận kết quả từ Server
     useEffect(() => {
         const handleCheckResult = (response) => {
             console.log("📨 Gói tin về:", response);
@@ -163,20 +169,16 @@ function Chat() {
             }
         };
 
-        // Đăng ký sự kiện
         websocketService.on('CHECK_USER_EXIST', handleCheckResult);
 
-        // Hủy đăng ký khi component bị hủy (Quan trọng để không bị lỗi khi Logout/Login)
         return () => {
             websocketService.off('CHECK_USER_EXIST', handleCheckResult);
         };
-    }, []); // Dependency rỗng là đúng
+    }, []);
 
-    // Logic Search
     const filteredConversations = filterConversations(conversations, searchTerm);
     const filteredRooms = filterRooms(rooms, searchTerm);
 
-    // Gửi JOIN_ROOM khi tìm phòng theo tên ở tab Rooms
     const handleRoomSearchSubmit = useCallback(() => {
         if (tab !== 'rooms') return;
         const roomName = (searchTerm || '').trim();
@@ -187,14 +189,10 @@ function Chat() {
         try { localStorage.setItem('selectedChat', JSON.stringify({ type: 'room', value: roomName })); } catch(e){}
     }, [tab, searchTerm, dispatch]);
 
-    // Xử lý Gửi tin nhắn
     const handleSendMessage = (e) => {
         e.preventDefault();
         if (!newMessage.trim()) return;
 
-        // Ensure room messages are sent with type 'room'
-        // 1) If a room is explicitly selected, send as room.
-        // 2) If no selectedRoom but selectedUser trùng tên một room trong state (so sánh trim), vẫn gửi type 'room'.
         const matchedRoomName = (() => {
             if (selectedRoom) return (selectedRoom.name || selectedRoom || '').toString().trim();
             if (selectedUser) {
@@ -243,8 +241,58 @@ function Chat() {
             return;
         }
     };
+    const handleSendFile = async (file) => {
+        if (!file) return;
 
-    // Xử lý Tạo phòng
+        try {
+            console.log("⏳ Đang upload lên Cloudinary...");
+            // Gọi hàm upload thay vì nén ảnh
+            const fileUrl = await uploadToCloudinary(file);
+
+            if (!fileUrl) {
+                alert("Upload thất bại!");
+                return;
+            }
+
+            const matchedRoomName = (() => {
+                if (selectedRoom) return (selectedRoom.name || selectedRoom || '').toString().trim();
+                if (selectedUser) {
+                    const su = selectedUser.toString().trim();
+                    const found = rooms.find(r => (r?.name || r || '').toString().trim() === su);
+                    if (found) return (found.name || found || '').toString().trim();
+                }
+                return null;
+            })();
+
+            const optimisticMsg = {
+                from: currentUser.name || currentUser.username || 'You',
+                mes: fileUrl, // <--- Giờ là URL chứ không phải Base64
+                time: new Date().toLocaleTimeString(),
+                to: matchedRoomName || selectedUser,
+                type: matchedRoomName ? 'room' : 'people',
+            };
+
+            if (matchedRoomName) {
+                websocketService.send('SEND_CHAT', {
+                    type: 'room',
+                    to: matchedRoomName,
+                    mes: fileUrl,
+                });
+                dispatch(addMessage(optimisticMsg));
+            } else if (selectedUser) {
+                websocketService.send('SEND_CHAT', {
+                    type: 'people',
+                    to: selectedUser,
+                    mes: fileUrl,
+                });
+                dispatch(addMessage(optimisticMsg));
+            }
+
+        } catch (error) {
+            console.error("Lỗi gửi file:", error);
+        }
+    };
+
     const handleCreateRoom = (e) => {
         e.preventDefault();
         if (!newRoomName.trim()) return;
@@ -252,7 +300,6 @@ function Chat() {
         dispatch(setNewRoomName(''));
     };
 
-    // Xử lý Đăng xuất
     const handleLogout = () => {
         localStorage.removeItem('isAuthenticated');
         localStorage.removeItem('currentUser');
@@ -261,10 +308,8 @@ function Chat() {
         navigate('/login');
     };
 
-    // Tên chat hiện tại để hiển thị tiêu đề
     const currentChatName = selectedUser || (selectedRoom ? (selectedRoom.name || selectedRoom) : null);
 
-    // --- 7. RENDER GIAO DIỆN ---
     return (
         <div className="chat-container">
             <ChatHeader
@@ -312,6 +357,7 @@ function Chat() {
                     newMessage={newMessage}
                     onNewMessageChange={(val) => dispatch(setNewMessage(val))}
                     onSendMessage={handleSendMessage}
+                    onSendImage={handleSendFile}
                     tab={tab}
                     messagesEndRef={messagesEndRef}
                 />
